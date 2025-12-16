@@ -123,62 +123,90 @@ with open(status_file, 'w') as f:
     yaml.dump(status, f, default_flow_style=False)
 ```
 
-#### Step 2.2: Analyze EVERY Page Individually (with Resume Support)
-**This is the most critical step for accuracy.**
+#### Step 2.2: Spawn Parallel Subagents for Page Analysis
 
-**RESUME LOGIC**: Skip pages already in status file, start from `last_analyzed_page + 1`
+**PERFORMANCE OPTIMIZATION**: Instead of analyzing pages sequentially (slow, hits 99 limit), spawn multiple subagents in parallel to divide the work.
+
+##### Calculate Subagent Allocation
+```python
+if total_pages <= 25:
+    num_agents = 1
+elif total_pages <= 50:
+    num_agents = 2
+elif total_pages <= 100:
+    num_agents = 4
+else:
+    num_agents = min(8, (total_pages // 25) + 1)
+
+pages_per_agent = total_pages // num_agents
+print(f"📊 Spawning {num_agents} subagents, ~{pages_per_agent} pages each")
+```
+
+##### Define Page Ranges
+```python
+ranges = []
+for i in range(num_agents):
+    start = i * pages_per_agent
+    end = (i + 1) * pages_per_agent - 1 if i < num_agents - 1 else total_pages - 1
+    ranges.append((start, end))
+```
+
+##### Spawn Subagents in Parallel
+
+Use the Task tool to spawn ALL agents simultaneously:
+
+```
+Task tool call:
+- subagent_type: "general-purpose"
+- prompt: |
+    You are a page analyzer subagent.
+
+    YOUR ASSIGNED RANGE: pages {start} to {end}
+
+    FILES:
+    - Pages folder: {output_folder}/pages/
+    - Status file: {output_folder}/homework-grading-status.yaml
+
+    ROSTER: {roster_list}
+
+    INSTRUCTIONS:
+    1. Invoke Skill: homework-grading-workflow for context
+    2. Analyze EACH page in your range using vision (Read tool)
+    3. Look at the "Name:" field at the top of each worksheet
+    4. Update the status file after EACH page (use file locking)
+    5. Report when complete
+```
+
+**CRITICAL**: Spawn ALL agents in a SINGLE message with multiple Task tool calls.
+
+##### Validate Subagent Results
+
+After all agents complete, validate:
 
 ```python
-start_page = status['last_analyzed_page'] + 1
-if start_page > 0:
-    print(f"⏩ Skipping pages 0-{start_page - 1} (already analyzed)")
-```
+issues = []
 
-For EACH page (starting from `start_page`):
-1. Use Claude's Read tool to view the page image
-2. Look at the **"Name:" field** at the TOP of the worksheet
-3. Read the handwritten student name carefully
-4. Identify the assignment type from the page header/title
-5. Record in status file IMMEDIATELY after each page
-6. Save status file after EVERY page (crash recovery)
+# Check 1: All pages analyzed
+analyzed_pages = set(status['pages'].keys())
+missing = set(range(total_pages)) - analyzed_pages
+if missing:
+    issues.append(f"❌ Missing pages: {missing}")
 
-**Page Analysis Template:**
-```
-Page X:
-- Raw name read: [exactly what you see written]
-- Matched student: [roster match]
-- Assignment: [assignment title from header]
-- Confidence: [high/medium/low]
-- Notes: [any issues]
-```
+# Check 2: Unknown students threshold (>10%)
+unknown_count = sum(1 for p in status['pages'].values() if p.get('confidence') == 'unknown')
+if unknown_count > total_pages * 0.1:
+    issues.append(f"⚠️ High unknown rate: {unknown_count}/{total_pages}")
 
-**After EACH page, update and save status:**
-```python
-status['pages'][page_num] = {
-    'status': 'analyzed',
-    'raw_name': raw_name,
-    'matched_student': matched_student,
-    'assignment': assignment,
-    'confidence': confidence
-}
-status['last_analyzed_page'] = page_num
+# Check 3: Students not in roster
+for page_num, info in status['pages'].items():
+    student = info.get('matched_student')
+    if student and student != 'Unknown' and student not in roster:
+        issues.append(f"⚠️ Page {page_num}: '{student}' not in roster")
 
-# Save immediately (crash recovery)
-with open(status_file, 'w') as f:
-    yaml.dump(status, f, default_flow_style=False)
-```
-
-**If 99 read limit reached:**
-```
-⚠️ Session Limit Reached
-
-Analyzed {N} pages this session (99 limit).
-Progress saved to: {status_file}
-
-To continue:
-1. Start a new Claude session
-2. Run the homework grading workflow again
-3. Workflow will resume from page {N+1}
+if issues:
+    print("🔍 Validation Issues Found")
+else:
+    print("✅ Validation Passed")
 ```
 
 #### Step 2.3: Build Page Mapping Data Structure
