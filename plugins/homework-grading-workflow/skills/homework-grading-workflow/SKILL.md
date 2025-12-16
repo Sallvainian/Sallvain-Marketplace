@@ -37,14 +37,25 @@ Skill: document-skills:xlsx
 ```
 Required inputs:
 ├── Homework PDF (e.g., Homework-1.pdf) - scanned student submissions
-└── Student roster (e.g., Student-Master-List.xlsx) - with period sheets (P1, P3, P4, P6, P7, P9)
+├── Student roster (e.g., Student-Master-List.xlsx) - with period sheets (Period 1, Period 3, Period 4, Period 6, Period 7, Period 9)
+└── Completion spreadsheet (e.g., Homework-Completion-List.xlsx) - existing homework tracker to update
+```
+
+**Completion Spreadsheet Structure:**
+```
+Expected format:
+- Column A: # (student number)
+- Column B: Student Name
+- Columns C+: Assignment names as headers
+- Last column: Total (formula counting X marks)
+- Mark submissions with 'X'
 ```
 
 #### Step 1.2: Read the Roster (USE XLSX SKILL)
 **Invoke xlsx skill** to read the student roster:
 ```
 1. Open Student-Master-List.xlsx
-2. Read the sheet for the target period (e.g., "P9")
+2. Read the sheet for the target period (e.g., "Period 9")
 3. Extract all student names into a list
 4. Note total student count for verification
 ```
@@ -160,69 +171,69 @@ for student, data in students.items():
 src.close()
 ```
 
-### Phase 5: Create/Update Completion Checklist (USE XLSX SKILL)
+### Phase 5: Update Existing Completion Spreadsheet (USE XLSX SKILL)
 
 **CRITICAL: Invoke the xlsx skill** for spreadsheet operations:
 ```
 Skill: document-skills:xlsx
 ```
 
-#### Step 5.1: Build Checklist Data
+#### Step 5.1: Open Existing Spreadsheet
 ```python
-checklist_data = []
-for student in roster:
-    row = {'Student': student}
-    if student in students:
-        for assignment in assignments_found:
-            row[assignment] = 'X' if assignment in students[student]['assignments'] else ''
-        row['Total'] = len(students[student]['assignments'])
-    else:
-        for assignment in assignments_found:
-            row[assignment] = ''
-        row['Total'] = 0
-    checklist_data.append(row)
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
+
+# Open existing spreadsheet
+wb = load_workbook('{completion_spreadsheet}')
+ws = wb['{period}']  # e.g., "Period 9"
 ```
 
-#### Step 5.2: Create/Update Excel File
-Using xlsx skill, create workbook with:
-- One sheet per period (P1, P3, P4, P6, P7, P9)
-- Columns: Student Name | Assignment1 | Assignment2 | ... | Total
-- Formatting:
-  - Header row bold
-  - Green fill for submitted (X)
-  - Red fill for missing (empty)
-  - Auto-fit column widths
-
+#### Step 5.2: Find and Insert New Assignment Column
 ```python
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+# Find the Total column (last column with data in row 1)
+total_col = None
+for col in range(ws.max_column, 0, -1):
+    if ws.cell(row=1, column=col).value == 'Total':
+        total_col = col
+        break
 
-wb = Workbook()
-ws = wb.active
-ws.title = "P9"  # or appropriate period
+# Insert new assignment column before Total
+new_col = total_col  # Insert at Total's position, pushing Total right
+ws.insert_cols(new_col)
 
-# Headers
-headers = ['Student'] + list(assignments_found) + ['Total']
-for col, header in enumerate(headers, 1):
-    cell = ws.cell(row=1, column=col, value=header)
-    cell.font = Font(bold=True)
-    cell.alignment = Alignment(horizontal='center')
+# Set assignment header
+assignment_name = list(assignments_found)[0] if len(assignments_found) == 1 else "Assignment"
+ws.cell(row=1, column=new_col, value=assignment_name)
+ws.cell(row=1, column=new_col).font = Font(bold=True)
+ws.cell(row=1, column=new_col).alignment = Alignment(horizontal='center')
+```
 
-# Data rows
+#### Step 5.3: Mark Submissions
+```python
 green_fill = PatternFill(start_color='90EE90', end_color='90EE90', fill_type='solid')
 red_fill = PatternFill(start_color='FFB6C1', end_color='FFB6C1', fill_type='solid')
 
-for row_num, data in enumerate(checklist_data, 2):
-    ws.cell(row=row_num, column=1, value=data['Student'])
-    for col_num, assignment in enumerate(assignments_found, 2):
-        cell = ws.cell(row=row_num, column=col_num, value=data.get(assignment, ''))
-        if data.get(assignment) == 'X':
-            cell.fill = green_fill
-        else:
-            cell.fill = red_fill
-    ws.cell(row=row_num, column=len(headers), value=data['Total'])
+for row in range(2, ws.max_row + 1):
+    student_name = ws.cell(row=row, column=2).value  # Column B = Student Name
+    if student_name:
+        has_submission = student_name in students
+        cell = ws.cell(row=row, column=new_col)
+        cell.value = 'X' if has_submission else ''
+        cell.fill = green_fill if has_submission else red_fill
+        cell.alignment = Alignment(horizontal='center')
+```
 
-wb.save('Homework-Completion-List.xlsx')
+#### Step 5.4: Update Total Formula
+```python
+# Update Total formula in the new Total column position (shifted right by 1)
+new_total_col = total_col + 1
+new_total_letter = get_column_letter(new_total_col - 1)
+for row in range(2, ws.max_row + 1):
+    # Count all X marks from column C to the column before Total
+    ws.cell(row=row, column=new_total_col).value = f'=COUNTIF(C{row}:{new_total_letter}{row},"X")'
+
+wb.save('{completion_spreadsheet}')
 ```
 
 ### Phase 6: Verification (CRITICAL FOR ACCURACY)
@@ -244,10 +255,11 @@ Verification checklist:
 □ Assignment types are correctly identified
 ```
 
-#### Step 6.2: Cross-Reference with Checklist
-- Verify checklist matches actual PDFs created
-- Confirm students with no submissions have empty rows
-- Check total counts are accurate
+#### Step 6.2: Cross-Reference with Spreadsheet
+- Verify new assignment column was added correctly
+- Confirm X marks match students with PDFs
+- Check Total formulas updated
+- Verify existing columns preserved
 
 ### Phase 7: Cleanup
 
@@ -259,28 +271,18 @@ rm -rf pages/  # Remove extracted images
 Keep:
 - Original PDF (backup)
 - Student Individual Files/ folder
-- Homework-Completion-List.xlsx
+- {completion_spreadsheet} (updated with new assignment column)
 
 ## Output Structure
 
 ```
-P9/
-├── Homework-1.pdf (original, keep as backup)
+{output_folder}/
+├── {homework_pdf} (original, keep as backup)
 ├── Student Individual Files/
-│   ├── Alexandler.pdf
-│   ├── Briana.pdf
-│   ├── Delilah.pdf
-│   ├── Eliomar.pdf
-│   ├── Elizabeth.pdf
-│   ├── James.pdf
-│   ├── Jayvon.pdf
-│   ├── Jeremy.pdf
-│   ├── Keyla.pdf
-│   ├── Laila.pdf
-│   ├── Maria.pdf
-│   ├── Markeeda.pdf
-│   └── Nahyla.pdf
-└── Homework-Completion-List.xlsx
+│   ├── {StudentName1}.pdf
+│   ├── {StudentName2}.pdf
+│   └── ...
+└── {completion_spreadsheet} (UPDATED with new assignment column)
 ```
 
 ## Accuracy Tips
