@@ -78,14 +78,7 @@ assignments_found:
 | verified | User confirmed the student |
 | skipped | User chose to skip this page |
 
-## Confidence Levels
-
-| Confidence | Criteria | Action |
-|------------|----------|--------|
-| high | Name clearly legible, exact roster match | Proceed automatically |
-| medium | Name readable, fuzzy match found | Proceed with note |
-| low | Name hard to read, best guess | Flag for user review |
-| unknown | Cannot read name at all | MUST get user input |
+**Confidence levels:** See [page-analysis.md](page-analysis.md) for confidence level definitions.
 
 ## Creating the Tracking File
 

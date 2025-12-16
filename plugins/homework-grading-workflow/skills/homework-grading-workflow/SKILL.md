@@ -1,45 +1,22 @@
 ---
 name: homework-grading-workflow
-description: Use when processing scanned homework PDFs, organizing student submissions by name, creating individual student files from batched scans, checking homework completion, or updating grading spreadsheets. Handles handwritten name recognition via vision, fuzzy roster matching, session resume for large batches, and checklist generation.
+description: >-
+  Process scanned homework PDFs by extracting student names via vision, matching to roster,
+  creating individual PDFs per student, and updating completion spreadsheets.
+  Triggers: "process homework PDF", "organize by student", "create student files from scan",
+  "update homework checklist", "who submitted", "sort assignments", "grade papers",
+  "split PDF by student", "track completion", "missing assignments".
+  Handles: batched scanned worksheets, handwritten name recognition, fuzzy roster matching,
+  session resume for large batches (99-image limit), teacher grading automation.
 ---
 
 # Homework Grading Workflow
 
-## Overview
+Process scanned homework: extract names from pages using vision → match to roster → create individual PDFs → update completion spreadsheets.
 
-Automates processing of scanned homework: extract student names from pages using vision, match to roster, create individual PDFs per student, and update completion spreadsheets.
+**Core accuracy rules:** Read EVERY page individually (no batching) | Focus on Name field at TOP | Verify EACH PDF after creation
 
-**Core accuracy requirements:**
-1. Read EVERY page individually (no batching)
-2. Focus on the Name field at TOP of worksheet
-3. Verify EACH PDF after creation
-
-## When to Use
-
-**Trigger phrases:**
-- "Process this homework PDF"
-- "Organize homework by student"
-- "Create individual student files from this scan"
-- "Update homework checklist"
-- "Which students submitted homework"
-- "Sort student assignments"
-- "Grade these papers"
-- "Split this PDF by student"
-- "Track homework completion"
-- "Who turned in homework"
-- "Missing assignments"
-
-**Symptoms this skill addresses:**
-- Batched scanned documents with multiple students' work
-- Need to identify handwritten names on worksheets
-- Teacher grading workflow automation
-- Class period tracking and organization
-- Assignment submission tracking
-
-**Required inputs:**
-- Scanned homework PDF (multiple students' work)
-- Student roster spreadsheet (with period sheets)
-- Completion spreadsheet (optional, for tracking)
+**Required inputs:** Scanned homework PDF + Student roster spreadsheet (with period sheets) + Completion spreadsheet (optional)
 
 ## Workflow Overview
 
@@ -97,6 +74,7 @@ Phase 6: Verification
 | Spreadsheet | [spreadsheet-update.md](reference/spreadsheet-update.md) | - |
 | Verification | [verification.md](reference/verification.md) | - |
 | Troubleshooting | [troubleshooting.md](reference/troubleshooting.md) | - |
+| Multi-Model Analysis | [clink-integration.md](reference/clink-integration.md) | PAL MCP `clink` tool |
 
 ## Required Skills Integration
 
@@ -108,91 +86,39 @@ Skill: document-skills:pdf   # For PDF manipulation
 
 ## Critical Rules
 
-### Phase 0 Rules (BEFORE ANYTHING ELSE)
+**Phase 0 (BEFORE ANYTHING ELSE):**
+- Create tracking file FIRST → Calculate batch plan (`ceil(pages/99)`) → Display plan → Get user confirmation
 
-1. **Create tracking file FIRST** - Before extracting PNGs or reading any pages
-2. **Calculate batch plan upfront** - `ceil(total_pages / 99)` = number of sessions
-3. **Display plan to user** - "150 pages = 2 sessions (99 + 51)"
-4. **Get user confirmation** - Don't proceed without approval
+**Page Analysis:**
+- ONE page per Read call (never batch) | Focus on "Name:" at TOP | Save to tracking file after EACH page | Stop at 99-image limit
 
-### Page Analysis Rules
+**Verification:**
+- Open and verify EACH student PDF | User MUST resolve uncertain pages | Cross-check spreadsheet X marks
 
-1. **One page at a time** - Use Read tool on each page image individually
-2. **Name field location** - Look at TOP of worksheet ("Name:" or "Student:")
-3. **Save to tracking file after EACH page** - Enables crash recovery and resume
-4. **99-image limit per session** - Stop and inform user when limit reached
+## Red Flags → STOP
 
-### Verification Rules
+| If you see... | Do this instead |
+|---------------|-----------------|
+| No tracking file created | Create tracking file FIRST with batch plan |
+| Batching pages | Read ONE page per Read call |
+| Unknown pages being processed | User MUST confirm names first |
+| Skipping PDF verification | Open and check EACH PDF |
+| Not saving after each page | Save to tracking file after EVERY page |
 
-1. **Never skip verification** - Open EACH student PDF and confirm
-2. **User must resolve uncertain pages** - Don't create PDFs with Unknown assignments
-3. **Cross-check spreadsheet** - X marks must match PDFs created
-
-## Red Flags - STOP and Review
-
-If you notice ANY of these, stop and investigate:
-
-| Red Flag | What's Wrong | Action |
-|----------|-------------|--------|
-| No tracking file yet | Starting analysis without Phase 0 | Create tracking file FIRST with batch plan |
-| No batch plan shown | User doesn't know session count | Display plan, get confirmation |
-| Batching pages | Reading multiple pages at once | Read ONE page per Read call |
-| Skipping verification | Not opening created PDFs | Verify EACH PDF |
-| Ignoring uncertain pages | Creating PDFs with Unknown | User must confirm names first |
-| Not saving to tracking file | Only saving at end | Save after EACH page |
-| Assuming page order | "Pages 1-10 are Student A" | Read name on EVERY page |
-
-## Confidence Levels
-
-| Level | Meaning | Action |
-|-------|---------|--------|
-| high | Name clear, exact roster match | Proceed |
-| medium | Name readable, fuzzy match | Proceed with note |
-| low | Name hard to read, best guess | Flag for user review |
-| unknown | Cannot read name | MUST get user input |
+**Confidence levels:** high (exact match) → proceed | medium (fuzzy match) → proceed with note | low/unknown → flag for user review. See [page-analysis.md](reference/page-analysis.md) for details. For difficult handwriting, use `clink` to get second opinion from another model - see [clink-integration.md](reference/clink-integration.md).
 
 ## Session Resume
 
-Claude has a 99-image limit per session. The tracking file manages this:
-
-```
-Phase 0:  Create tracking file, show batch plan:
-          "150 pages = 2 sessions (99 + 51)"
-          User confirms.
-
-Session 1: Analyze pages 0-98, save each to tracking file
-           At page 98: "Session limit reached. Resume in new session."
-
-Session 2: Detect tracking file, resume from page 99
-           Analyze pages 99-149
-           All pages done → proceed to PDF creation
-```
-
-Tracking file location: `{output_folder}/homework-grading-status.yaml`
+99-image limit per session. Tracking file (`{output_folder}/homework-grading-status.yaml`) enables automatic resume. See [status-tracking.md](reference/status-tracking.md) for schema and resume workflow.
 
 ## Output Structure
 
 ```
 {output_folder}/
-├── homework-grading-status.yaml (workflow state)
-├── Student Individual Files/
-│   ├── {Student1}.pdf
-│   ├── {Student2}.pdf
-│   └── ...
+├── homework-grading-status.yaml
+├── Student Individual Files/{Student}.pdf
 └── {completion_spreadsheet} (updated)
 ```
-
-## Common Mistakes
-
-| Mistake | Why It Fails | Correct Approach |
-|---------|-------------|------------------|
-| Skipping Phase 0 | No batch plan, can't resume properly | Create tracking file FIRST |
-| Not showing batch plan | User surprised by multi-session work | Display plan, get confirmation |
-| Reading multiple pages at once | Can't accurately identify names | One page per Read call |
-| Not checking Name field specifically | Other text confuses matching | Focus on "Name:" at top |
-| Skipping PDF verification | Wrong pages get included | Open and check each PDF |
-| Forcing through Unknown pages | Creates unusable output | Get user confirmation |
-| Not using xlsx skill | Spreadsheet corruption | Always invoke xlsx skill first |
 
 ## Prerequisites
 

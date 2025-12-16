@@ -117,19 +117,19 @@ for page_num in data['pages']:
         print(f"Invalid page {page_num} (max is {max_page})")
 ```
 
-### Parallel Subagent Issues
+### Missing Pages in Status File
 
-**Symptoms**: Some pages missing after parallel processing.
+**Symptoms**: Some pages not recorded in status file.
 
 **Causes**:
-- Subagent failed mid-processing
-- File locking issue
-- Subagent range overlap
+- Session interrupted mid-processing
+- Page was skipped due to error
+- Status file not saved after page analysis
 
 **Solutions**:
 1. Check status file for gaps in page numbers
-2. Re-dispatch subagent for missing range
-3. Verify no range overlaps in dispatch
+2. Resume workflow to process missing pages
+3. Manually add missing pages to status file if needed
 
 ```python
 # Find missing pages
