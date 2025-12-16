@@ -16,7 +16,17 @@ Automate the processing of scanned student homework submissions:
 
 ## Installation
 
-### Option 1: Clone and Copy Skills
+### Option 1: Claude Code Plugin Command (Recommended)
+
+```bash
+# Add the marketplace
+/plugin marketplace add Sallvainian/Sallvain-Marketplace
+
+# Install the plugin
+/plugin install homework-grading-workflow@Sallvain-Marketplace
+```
+
+### Option 2: Clone and Copy Skills
 
 ```bash
 # Clone the repository
@@ -25,11 +35,6 @@ git clone https://github.com/Sallvainian/Sallvain-Marketplace.git ~/.claude-plug
 # Copy skills to Claude Code skills directory
 cp -r ~/.claude-plugins/Sallvain-Marketplace/plugins/homework-grading-workflow/skills/* ~/.claude/skills/
 ```
-
-### Option 2: Manual Installation
-
-1. Download the repository
-2. Copy the `skills/` folder contents to `~/.claude/skills/`
 
 ## Usage
 
