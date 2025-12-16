@@ -69,31 +69,78 @@ roster = ['Alexandler', 'Briana', 'Delilah', 'Eliomar', 'Elizabeth',
 
 ### Phase 2: Page-by-Page Analysis (CRITICAL FOR ACCURACY)
 
+**IMPORTANT**: Claude has a 99 image read limit per session. This workflow uses a status file to persist progress and allow resuming across sessions.
+
+#### Step 2.0: Initialize or Resume Status Tracking
+```python
+import yaml
+import os
+from datetime import datetime
+
+status_file = '{output_folder}/homework-grading-status.yaml'
+
+# Check for existing status file (resume mode)
+if os.path.exists(status_file):
+    with open(status_file, 'r') as f:
+        status = yaml.safe_load(f)
+    last_page = status.get('last_analyzed_page', -1)
+    print(f"📂 Resuming from page {last_page + 1}")
+else:
+    # Create new status file
+    status = {
+        'generated': datetime.now().isoformat(),
+        'workflow_status': 'analyzing',
+        'total_pages': 0,
+        'last_analyzed_page': -1,
+        'pages': {},
+        'students': {},
+        'uncertain_pages': [],
+        'assignments_found': []
+    }
+    print("📝 Created new status tracking file")
+```
+
 #### Step 2.1: Extract PDF Pages as Images
 ```python
 import fitz
-import os
 
 os.makedirs('pages', exist_ok=True)
 doc = fitz.open('Homework-1.pdf')
 total_pages = len(doc)
+status['total_pages'] = total_pages
 print(f"Total pages to analyze: {total_pages}")
 
+# Extract pages (skip if already extracted)
 for i in range(total_pages):
-    page = doc[i]
-    pix = page.get_pixmap(dpi=150)
-    pix.save(f'pages/page_{i:03d}.png')
+    page_path = f'pages/page_{i:03d}.png'
+    if not os.path.exists(page_path):
+        page = doc[i]
+        pix = page.get_pixmap(dpi=150)
+        pix.save(page_path)
+
+# Save status
+with open(status_file, 'w') as f:
+    yaml.dump(status, f, default_flow_style=False)
 ```
 
-#### Step 2.2: Analyze EVERY Page Individually
+#### Step 2.2: Analyze EVERY Page Individually (with Resume Support)
 **This is the most critical step for accuracy.**
 
-For EACH page (0 to N-1):
+**RESUME LOGIC**: Skip pages already in status file, start from `last_analyzed_page + 1`
+
+```python
+start_page = status['last_analyzed_page'] + 1
+if start_page > 0:
+    print(f"⏩ Skipping pages 0-{start_page - 1} (already analyzed)")
+```
+
+For EACH page (starting from `start_page`):
 1. Use Claude's Read tool to view the page image
 2. Look at the **"Name:" field** at the TOP of the worksheet
 3. Read the handwritten student name carefully
 4. Identify the assignment type from the page header/title
-5. Record in structured format
+5. Record in status file IMMEDIATELY after each page
+6. Save status file after EVERY page (crash recovery)
 
 **Page Analysis Template:**
 ```
@@ -103,6 +150,35 @@ Page X:
 - Assignment: [assignment title from header]
 - Confidence: [high/medium/low]
 - Notes: [any issues]
+```
+
+**After EACH page, update and save status:**
+```python
+status['pages'][page_num] = {
+    'status': 'analyzed',
+    'raw_name': raw_name,
+    'matched_student': matched_student,
+    'assignment': assignment,
+    'confidence': confidence
+}
+status['last_analyzed_page'] = page_num
+
+# Save immediately (crash recovery)
+with open(status_file, 'w') as f:
+    yaml.dump(status, f, default_flow_style=False)
+```
+
+**If 99 read limit reached:**
+```
+⚠️ Session Limit Reached
+
+Analyzed {N} pages this session (99 limit).
+Progress saved to: {status_file}
+
+To continue:
+1. Start a new Claude session
+2. Run the homework grading workflow again
+3. Workflow will resume from page {N+1}
 ```
 
 #### Step 2.3: Build Page Mapping Data Structure
