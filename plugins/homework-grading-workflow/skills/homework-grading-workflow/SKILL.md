@@ -144,22 +144,37 @@ num_subagents = min(4, (total_pages + 24) // 25)  # ~25 pages per subagent
 pages_per_agent = total_pages // num_subagents
 ```
 
+**First**, read the subagent skill file (if available in project):
+```
+Read: {workflow_path}/skills/page-reader-subagent/SKILL.md
+```
+
 Use the Task tool to dispatch multiple subagents in a SINGLE message:
 - Each subagent processes a range of pages
 - All subagents update the shared status file with thread-safe locking
 - Report completion when done
 
-**Subagent prompt template:**
+**Subagent prompt template (include full skill instructions if available):**
 ```
-You are a page-reader subagent. Your task:
-1. Process pages {start_page} to {end_page} from: {pages_folder}
-2. For each page, read with vision and extract:
-   - Student name (from 'Name:' field at top)
-   - Assignment name (from header)
-   - Confidence level (high/medium/low/unknown)
-3. Update status file with thread-safe locking (fcntl): {status_file}
-4. Roster for matching: {roster}
+Process pages {start_page} to {end_page}
+
+Context:
+- Pages folder: {pages_folder}
+- Status file: {status_file}
+- Roster: {roster}
+
+For each page:
+1. Read with vision, focus on "Name:" field at top
+2. Extract student name, assignment name, confidence level
+3. Update status file with thread-safe locking (fcntl)
+4. Save after EACH page for crash recovery
+
+Report completion with summary when done.
 ```
+
+**CRITICAL**:
+1. Read skill file BEFORE dispatching (if exists)
+2. Dispatch ALL subagents in a SINGLE message for parallel execution
 
 ##### Validate After Subagents Complete
 ```
