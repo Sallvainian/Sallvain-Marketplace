@@ -1,11 +1,15 @@
 {
   "name": "Sallvain-Marketplace",
-  "description": "Educational tools for teachers - homework grading, student organization, and classroom management",
+  "owner": {
+    "name": "Sallvainian",
+    "email": "sallvainian@github.com"
+  },
   "plugins": [
     {
       "name": "homework-grading-workflow",
       "description": "Process scanned homework PDFs, identify students, create individual files, and generate completion checklists",
-      "path": "plugins/homework-grading-workflow"
+      "source": "./plugins/homework-grading-workflow",
+      "version": "1.0.0"
     }
   ]
 }
