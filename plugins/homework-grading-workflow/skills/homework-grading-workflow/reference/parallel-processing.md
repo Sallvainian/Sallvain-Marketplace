@@ -39,46 +39,42 @@ def calculate_distribution(total_pages, max_subagents=4, pages_per_agent=25):
 
 **CRITICAL**: Dispatch ALL subagents in a SINGLE message for true parallel execution.
 
+### Using Task Tool
+
+**IMPORTANT**: Use `subagent_type: "page-analyzer"` - NOT "general-purpose"!
+
+The `page-analyzer` agent is registered in `plugin.json` and knows how to process pages. Do NOT paste skill instructions into the prompt.
+
+```python
+# Dispatch in SINGLE message with multiple Task tool calls
+for start, end in ranges:
+    # Task tool parameters:
+    # - subagent_type: "page-analyzer"
+    # - run_in_background: false
+    # - prompt: (see template below)
+    pass
+```
+
 ### Subagent Prompt Template
 
 ```
-Process pages {start_page} to {end_page} for homework grading.
+Analyze pages {start_page} to {end_page} for homework grading.
 
 Context:
 - Pages folder: {pages_folder}
 - Status file: {status_file}
 - Roster: {roster_list}
 
-For each page {start_page} to {end_page}:
-1. Read page image with vision: {pages_folder}/page_{N:03d}.png
+Use thread-safe file locking (fcntl) when updating status.
+Report completion with summary when done.
+```
+
+The `page-analyzer` subagent already knows to:
+1. Read each page image with vision
 2. Focus on "Name:" field at TOP of worksheet
-3. Read handwritten name exactly as written
-4. Match to roster (fuzzy matching allowed)
-5. Determine confidence: high/medium/low/unknown
-6. Identify assignment from page header
-7. Update status file with thread-safe locking
-
-After EACH page, update status file:
-- Use filelock for thread safety
-- Save page_num, raw_name, matched_student, assignment, confidence
-
-Report completion:
-✅ Subagent Complete
-Pages: {start_page} to {end_page}
-Total: {count}
-High confidence: {N}
-Low confidence: {M}
-Unknown: {X}
-```
-
-### Using Task Tool
-
-```python
-# Dispatch in SINGLE message with multiple Task calls
-for start, end in ranges:
-    # Task tool call with subagent prompt
-    pass
-```
+3. Match to roster with fuzzy matching
+4. Determine confidence level
+5. Update status file with locking
 
 ## Subagent Status File Updates
 
