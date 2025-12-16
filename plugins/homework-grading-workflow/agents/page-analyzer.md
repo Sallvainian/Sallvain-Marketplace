@@ -1,29 +1,25 @@
 ---
 name: page-analyzer
-description: |-
-  Analyzes scanned homework pages to extract student names using vision. Processes assigned page ranges, matches handwriting to roster, records results to shared status file.
-  <example>Context: [batch processing 100 pages] user: 'analyze pages 0-24' assistant: 'Reading page_000.png... Name field shows "Sarah K", matched to Sarah Khan with high confidence' <commentary>Uses vision for each page, updates status file with file locking</commentary></example>
-color: cyan
-model: opus
-tools: [Read, Write, Edit, Bash, Grep, Glob]
+description: Analyzes scanned homework pages to extract student names using vision. Processes assigned page ranges, matches handwriting to roster, and records results to shared status file with thread-safe locking. Use when dispatching parallel subagents for batch page processing.
 ---
 
 # Page Analyzer Subagent
 
-You are a page analysis subagent for the Homework Grading Workflow. Your job is to analyze a specific range of scanned homework pages and extract student names.
+Analyzes a specific range of scanned homework pages and extracts student names for the Homework Grading Workflow.
 
-## Your Task
+## Input Parameters
 
-You will be given:
-- `start_page`: First page number to analyze (0-indexed)
-- `end_page`: Last page number to analyze (inclusive)
-- `pages_folder`: Path to extracted page images
-- `status_file`: Path to shared status YAML file
-- `roster`: List of valid student names to match against
+| Parameter | Description |
+|-----------|-------------|
+| `start_page` | First page number to analyze (0-indexed) |
+| `end_page` | Last page number to analyze (inclusive) |
+| `pages_folder` | Path to extracted page images |
+| `status_file` | Path to shared status YAML file |
+| `roster` | List of valid student names to match against |
 
 ## Instructions
 
-### 1. Read Each Page in Your Range
+### 1. Read Each Page in Range
 
 For each page from `start_page` to `end_page`:
 
@@ -36,12 +32,14 @@ For each page from `start_page` to `end_page`:
 ### 2. Record Each Page Result
 
 For each page, determine:
-- `raw_name`: Exactly what you read from the handwriting
+- `raw_name`: Exactly what is read from the handwriting
 - `matched_student`: Best match from roster (or "Unknown")
 - `assignment`: Assignment name from page header
 - `confidence`: high / medium / low / unknown
 
 ### 3. Update Status File After EACH Page
+
+**CRITICAL**: Use file locking for thread safety.
 
 ```python
 import yaml
@@ -59,16 +57,16 @@ with lock:
         'matched_student': matched_student,
         'assignment': assignment,
         'confidence': confidence,
-        'analyzed_by': 'subagent_{start_page}_{end_page}'
+        'analyzed_by': f'subagent_{start_page}_{end_page}'
     }
 
     with open(status_file, 'w') as f:
         yaml.dump(status, f, default_flow_style=False)
 ```
 
-### 4. Report When Done
+### 4. Report Completion
 
-When you've analyzed all pages in your range, report:
+When all assigned pages are processed, report:
 
 ```
 ✅ Subagent Complete
@@ -85,7 +83,7 @@ Unknown: {unknown_count}
 - **ONE PAGE AT A TIME**: Analyze each page individually with vision
 - **SAVE IMMEDIATELY**: Update status file after EVERY page
 - **USE FILE LOCKING**: Multiple agents write to same file
-- **STAY IN RANGE**: Only analyze pages in your assigned range
+- **STAY IN RANGE**: Only analyze pages in assigned range
 - **MATCH TO ROSTER**: Always try to match names to the provided roster
 
 ## Confidence Guidelines
@@ -110,6 +108,6 @@ Page 15/100:
 ## Limitations
 
 - Only processes assigned page range
-- Requires vision model (Opus) for handwriting analysis
+- Requires vision model for handwriting analysis
 - Does not verify assignment correctness, only extracts names
 - Cannot create new roster entries

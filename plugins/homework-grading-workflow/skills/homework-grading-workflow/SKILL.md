@@ -1,549 +1,216 @@
 ---
-name: homework-grading-workflow
-description: Process scanned homework PDFs by extracting student names from pages using vision, matching against a roster Excel file, grouping pages by student, creating individual PDFs per student, and generating completion checklists. Use when you have scanned homework submissions, need to organize homework by student, grade student work, or process a batch of student assignments from a PDF.
+name: Processing Homework Submissions
+description: Processes scanned homework PDFs by extracting student names using vision, matching against roster, creating individual student PDFs, and updating completion spreadsheets. Use when processing homework scans, organizing submissions by student, grading assignments, or tracking homework completion.
 ---
 
-# Homework Grading Workflow
+# Processing Homework Submissions
 
-## Overview
+Automates processing of scanned student homework through a multi-phase verification workflow.
 
-This skill automates the processing of scanned student homework submissions through a multi-pass verification workflow that ensures accuracy.
+## Contents
 
-## ⚠️ THE REAL ACCURACY FIX
+- [Quick Start](#quick-start)
+- [Required Inputs](#required-inputs)
+- [Workflow Overview](#workflow-overview)
+- [Phase 1: Setup](#phase-1-setup)
+- [Phase 2: Page Analysis](#phase-2-page-analysis)
+- [Phase 3: PDF Creation](#phase-3-pdf-creation)
+- [Phase 4: Update Spreadsheet](#phase-4-update-spreadsheet)
+- [Phase 5: Verification](#phase-5-verification)
+- [Troubleshooting](#troubleshooting)
 
-**These three things are what made this workflow accurate:**
+## Critical Success Factors
 
-1. **Reading EVERY page individually** - Do NOT batch pages. Analyze each page one at a time with Claude's vision.
-2. **Focusing on the Name field specifically** - Look at the TOP of each worksheet where "Name:" appears. Ignore other text.
-3. **Verification phase after PDF creation** - Open EACH student PDF and confirm all pages belong to that student before finishing.
+Three things ensure accuracy:
 
-## Critical Skills Integration
+1. **Read EVERY page individually** - Never batch pages. Analyze each with vision.
+2. **Focus on the Name field** - Look at TOP of worksheet where "Name:" appears.
+3. **Verify after PDF creation** - Open EACH student PDF and confirm pages match.
 
-**IMPORTANT**: This workflow uses these skills in conjunction:
-- **xlsx skill**: For reading roster files and creating/updating completion checklists
-- **pdf skill**: For extracting and creating PDF files
-- **Vision (Read tool)**: For reading handwritten names from scanned pages
+## Quick Start
 
-When processing spreadsheets, **always invoke the xlsx skill first** by calling:
+```
+1. Gather: homework PDF, roster Excel, completion spreadsheet
+2. Invoke document-skills:xlsx before spreadsheet operations
+3. Extract PDF pages as images
+4. Analyze each page with vision (read Name field)
+5. Create individual student PDFs
+6. Update completion spreadsheet
+7. Verify all outputs
+```
+
+## Required Inputs
+
+| Input | Description | Example |
+|-------|-------------|---------|
+| `homework_pdf` | Scanned homework PDF | `Homework-1.pdf` |
+| `roster_file` | Student roster Excel | `Student-Master-List.xlsx` |
+| `period` | Class period (sheet name) | `Period 4` |
+| `output_folder` | Output directory | `./P4/` |
+| `completion_spreadsheet` | Homework tracker | `Homework-Completion-List.xlsx` |
+
+## Skill Dependencies
+
+**CRITICAL**: Invoke these skills before related operations:
+
+| Skill | When to Invoke |
+|-------|----------------|
+| `document-skills:xlsx` | Before any spreadsheet operation |
+| `document-skills:pdf` | Before PDF manipulation |
+
 ```
 Skill: document-skills:xlsx
 ```
 
-## Workflow Phases
+## Workflow Overview
 
-### Phase 1: Setup and Data Collection
+| Phase | Description | Details |
+|-------|-------------|---------|
+| 1. Setup | Validate files, read roster | Below |
+| 2. Page Analysis | Read each page with vision | [reference/page-analysis.md](reference/page-analysis.md) |
+| 3. PDF Creation | Create student PDFs | [reference/pdf-creation.md](reference/pdf-creation.md) |
+| 4. Spreadsheet | Update completion checklist | [reference/spreadsheet-update.md](reference/spreadsheet-update.md) |
+| 5. Verification | Verify all outputs | [reference/verification.md](reference/verification.md) |
 
-#### Step 1.1: Identify Required Files
-```
-Required inputs:
-├── Homework PDF (e.g., Homework-1.pdf) - scanned student submissions
-├── Student roster (e.g., Student-Master-List.xlsx) - with period sheets (Period 1, Period 3, Period 4, Period 6, Period 7, Period 9)
-└── Completion spreadsheet (e.g., Homework-Completion-List.xlsx) - existing homework tracker to update
-```
+## Phase 1: Setup
 
-**Completion Spreadsheet Structure:**
-```
-Expected format:
-- Column A: # (student number)
-- Column B: Student Name
-- Columns C+: Assignment names as headers
-- Last column: Total (formula counting X marks)
-- Mark submissions with 'X'
-```
+### 1.1 Validate Required Files
 
-#### Step 1.2: Read the Roster (USE XLSX SKILL)
-**Invoke xlsx skill** to read the student roster:
-```
-1. Open Student-Master-List.xlsx
-2. Read the sheet for the target period (e.g., "Period 9")
-3. Extract all student names into a list
-4. Note total student count for verification
+Confirm all input files exist before proceeding.
+
+### 1.2 Read Roster
+
+**Invoke xlsx skill first**, then read the period sheet and extract student names into a list.
+
+### 1.3 Extract PDF Pages
+
+```bash
+python scripts/extract_pages.py {homework_pdf} {output_folder}/pages/
 ```
 
-Store roster as reference list:
-```python
-roster = ['Alexandler', 'Briana', 'Delilah', 'Eliomar', 'Elizabeth',
-          'James', 'Jayvon', 'Jeremy', 'Keyla', 'Laila',
-          'Logan', 'Maria', 'Markeeda', 'Nahyla', 'Rafiah']
-```
+Creates numbered images: `page_000.png`, `page_001.png`, etc.
 
-### Phase 2: Page-by-Page Analysis (CRITICAL FOR ACCURACY)
+### 1.4 Initialize Status File
 
-**IMPORTANT**: Claude has a 99 image read limit per session. This workflow uses a status file to persist progress and allow resuming across sessions.
+Progress persists to `homework-grading-status.yaml` for crash recovery and session resumption.
 
-#### Step 2.0: Initialize or Resume Status Tracking
-```python
-import yaml
-import os
-from datetime import datetime
+See [reference/status-tracking.md](reference/status-tracking.md) for schema.
 
-status_file = '{output_folder}/homework-grading-status.yaml'
+## Phase 2: Page Analysis
 
-# Check for existing status file (resume mode)
-if os.path.exists(status_file):
-    with open(status_file, 'r') as f:
-        status = yaml.safe_load(f)
-    last_page = status.get('last_analyzed_page', -1)
-    print(f"📂 Resuming from page {last_page + 1}")
-else:
-    # Create new status file
-    status = {
-        'generated': datetime.now().isoformat(),
-        'workflow_status': 'analyzing',
-        'total_pages': 0,
-        'last_analyzed_page': -1,
-        'pages': {},
-        'students': {},
-        'uncertain_pages': [],
-        'assignments_found': []
-    }
-    print("📝 Created new status tracking file")
-```
-
-#### Step 2.1: Extract PDF Pages as Images
-```python
-import fitz
-
-os.makedirs('pages', exist_ok=True)
-doc = fitz.open('Homework-1.pdf')
-total_pages = len(doc)
-status['total_pages'] = total_pages
-print(f"Total pages to analyze: {total_pages}")
-
-# Extract pages (skip if already extracted)
-for i in range(total_pages):
-    page_path = f'pages/page_{i:03d}.png'
-    if not os.path.exists(page_path):
-        page = doc[i]
-        pix = page.get_pixmap(dpi=150)
-        pix.save(page_path)
-
-# Save status
-with open(status_file, 'w') as f:
-    yaml.dump(status, f, default_flow_style=False)
-```
-
-#### Step 2.1.5: Choose Processing Mode
-
-```
-📊 **Processing Mode**
-
-Total pages to analyze: {total_pages}
-
-[S] Sequential - Process pages one at a time (slower, but you see each page)
-[P] Parallel - Dispatch subagents to process simultaneously (faster)
-
-Recommended: Parallel for >20 pages
-```
-
-**If Parallel mode selected:**
-
-##### Dispatch Subagents in Parallel
-```python
-num_subagents = min(4, (total_pages + 24) // 25)  # ~25 pages per subagent
-pages_per_agent = total_pages // num_subagents
-```
-
-**First**, read the subagent skill file (if available in project):
-```
-Read: {workflow_path}/skills/page-reader-subagent/SKILL.md
-```
-
-Use the Task tool to dispatch multiple subagents in a SINGLE message:
-- Each subagent processes a range of pages
-- All subagents update the shared status file with thread-safe locking
-- Report completion when done
-
-**Subagent prompt template (include full skill instructions if available):**
-```
-Process pages {start_page} to {end_page}
-
-Context:
-- Pages folder: {pages_folder}
-- Status file: {status_file}
-- Roster: {roster}
+**THE KEY TO ACCURACY**: Read EVERY page individually with vision.
 
 For each page:
-1. Read with vision, focus on "Name:" field at top
-2. Extract student name, assignment name, confidence level
-3. Update status file with thread-safe locking (fcntl)
-4. Save after EACH page for crash recovery
+1. Use Read tool to view `pages/page_NNN.png`
+2. Focus on **"Name:" field** at the TOP
+3. Read handwritten name carefully
+4. Match to roster using fuzzy matching
+5. Record with confidence level (high/medium/low/unknown)
+6. Save status after EACH page
 
-Report completion with summary when done.
-```
+**Detailed instructions**: See [reference/page-analysis.md](reference/page-analysis.md)
 
-**CRITICAL**:
-1. Read skill file BEFORE dispatching (if exists)
-2. Dispatch ALL subagents in a SINGLE message for parallel execution
+### Processing Modes
 
-##### Validate After Subagents Complete
-```
-🔍 **Subagent Validation Check**
+| Mode | Use When | Description |
+|------|----------|-------------|
+| Sequential (default) | <50 pages | Process one at a time |
+| Parallel | >50 pages | Dispatch subagents |
 
-1. All pages have entries (0 to total_pages-1)
-2. No duplicate student assignments for same page
-3. Roster names used correctly
-4. Red flags:
-   - Same student on >50% of pages
-   - Student not in roster
-   - Too many "UNKNOWN" (>20%)
-```
+For parallel processing, see [reference/parallel-processing.md](reference/parallel-processing.md).
 
----
+### Manual Verification
 
-**If Sequential mode selected (or resuming):**
+Before PDF creation, verify any pages with `confidence < high` or unreadable names. Display page image to user and confirm/correct assignment.
 
-#### Step 2.2: Analyze EVERY Page Individually (with Resume Support)
-**This is the most critical step for accuracy.**
+## Phase 3: PDF Creation
 
-**RESUME LOGIC**: Skip pages already in status file, start from `last_analyzed_page + 1`
+Group pages by student and create individual PDFs.
 
-```python
-start_page = status['last_analyzed_page'] + 1
-if start_page > 0:
-    print(f"⏩ Skipping pages 0-{start_page - 1} (already analyzed)")
-```
-
-For EACH page (starting from `start_page`):
-1. Use Claude's Read tool to view the page image
-2. Look at the **"Name:" field** at the TOP of the worksheet
-3. Read the handwritten student name carefully
-4. Identify the assignment type from the page header/title
-5. Record in status file IMMEDIATELY after each page
-6. Save status file after EVERY page (crash recovery)
-
-**Page Analysis Template:**
-```
-Page X:
-- Raw name read: [exactly what you see written]
-- Matched student: [roster match]
-- Assignment: [assignment title from header]
-- Confidence: [high/medium/low]
-- Notes: [any issues]
-```
-
-**After EACH page, update and save status:**
-```python
-status['pages'][page_num] = {
-    'status': 'analyzed',
-    'raw_name': raw_name,
-    'matched_student': matched_student,
-    'assignment': assignment,
-    'confidence': confidence
-}
-status['last_analyzed_page'] = page_num
-
-# Save immediately (crash recovery)
-with open(status_file, 'w') as f:
-    yaml.dump(status, f, default_flow_style=False)
-```
-
-**If 99 read limit reached:**
-```
-⚠️ Session Limit Reached
-
-Analyzed {N} pages this session (99 limit).
-Progress saved to: {status_file}
-
-To continue:
-1. Start a new Claude session
-2. Run the homework grading workflow again
-3. Workflow will resume from page {N+1}
-```
-
-#### Step 2.3: Build Page Mapping Data Structure
-After analyzing ALL pages, create mapping:
-```python
-page_mapping = {
-    0: {'student': 'Keyla', 'assignment': 'Identifying Variables', 'page_of': 1},
-    1: {'student': 'Keyla', 'assignment': 'Identifying Variables', 'page_of': 2},
-    2: {'student': 'Briana', 'assignment': 'Identifying Variables', 'page_of': 1},
-    # ... continue for ALL pages
-}
-
-# Then consolidate by student:
-students = {}
-for page_num, info in page_mapping.items():
-    student = info['student']
-    if student not in students:
-        students[student] = {'pages': [], 'assignments': set()}
-    students[student]['pages'].append(page_num)
-    students[student]['assignments'].add(info['assignment'])
-```
-
-### Phase 3: Identify Assignment Types
-
-Scan through page_mapping to identify unique assignments:
-```python
-assignments_found = set()
-for page_num, info in page_mapping.items():
-    assignments_found.add(info['assignment'])
-
-print(f"Assignments found: {assignments_found}")
-```
-
-Common assignment patterns:
-| Assignment | Pages | Identifier |
-|------------|-------|------------|
-| Identifying Variables | 2 | Title at top |
-| Changes in Kinetic Energy | 1 | Blue/colored page |
-| Investigation Planning Guide | 2 | "Planning Guide" header |
-| Investigating Force Interaction | 2 | "Force Interaction" header |
-| Lesson 5: Variables | 1 | "Lesson 5" header |
-
-### Phase 3.5: User Verification of Uncertain Pages
-
-**CRITICAL**: Before creating PDFs, the user MUST verify any pages with low confidence or unreadable names.
-
-If there are pages with confidence < high OR pages where the name could not be read:
-
-```
-⚠️ **Manual Verification Required**
-
-The following pages need your review:
-
-**Low Confidence Matches:**
-| Page | Raw Name Read | Best Match | Confidence |
-|------|---------------|------------|------------|
-| {page_num} | "{raw_name}" | {matched_student} | low |
-
-**Unreadable Names:**
-| Page | Notes |
-|------|-------|
-| {page_num} | Could not make out name |
-
-Please verify or correct each entry.
-```
-
-For each uncertain page:
-1. Display the page image to the user
-2. Ask: "Who does this page belong to? (or type 'skip' to exclude)"
-3. Update the page_mapping with user's correction
-4. Continue to next uncertain page
-
-Only proceed to PDF creation after ALL uncertain pages are resolved.
-
-```python
-# Collect pages needing review
-uncertain_pages = []
-for page_num, info in page_mapping.items():
-    if info.get('confidence') in ['low', 'unknown'] or info.get('student') == 'Unknown':
-        uncertain_pages.append((page_num, info))
-
-if uncertain_pages:
-    print(f"⚠️ {len(uncertain_pages)} pages need manual verification")
-    for page_num, info in uncertain_pages:
-        # Show page image and ask user to confirm/correct
-        user_response = ask_user(f"Page {page_num}: Read as '{info.get('raw_name')}', matched to '{info.get('student')}'. Correct?")
-        if user_response != 'skip':
-            page_mapping[page_num]['student'] = user_response
-            page_mapping[page_num]['confidence'] = 'user_verified'
-```
-
-### Phase 4: Create Individual Student PDFs
-
-#### Step 4.1: Create Output Directory
-```python
-import os
-os.makedirs('Student Individual Files', exist_ok=True)
-```
-
-#### Step 4.2: Generate PDFs
-```python
-import fitz
-
-src = fitz.open('Homework-1.pdf')
-
-for student, data in students.items():
-    if data['pages']:  # Only if student has submissions
-        output = fitz.open()
-        for page_num in sorted(data['pages']):
-            output.insert_pdf(src, from_page=page_num, to_page=page_num)
-        output.save(f'Student Individual Files/{student}.pdf')
-        output.close()
-        print(f"Created: {student}.pdf ({len(data['pages'])} pages)")
-
-src.close()
-```
-
-### Phase 5: Update Existing Completion Spreadsheet (USE XLSX SKILL)
-
-**CRITICAL: Invoke the xlsx skill** for spreadsheet operations:
-```
-Skill: document-skills:xlsx
-```
-
-#### Step 5.1: Open Existing Spreadsheet
-```python
-from openpyxl import load_workbook
-from openpyxl.styles import Font, PatternFill, Alignment
-from openpyxl.utils import get_column_letter
-
-# Open existing spreadsheet
-wb = load_workbook('{completion_spreadsheet}')
-ws = wb['{period}']  # e.g., "Period 9"
-```
-
-#### Step 5.2: Find and Insert New Assignment Column
-```python
-# Find the Total column (last column with data in row 1)
-total_col = None
-for col in range(ws.max_column, 0, -1):
-    if ws.cell(row=1, column=col).value == 'Total':
-        total_col = col
-        break
-
-# Insert new assignment column before Total
-new_col = total_col  # Insert at Total's position, pushing Total right
-ws.insert_cols(new_col)
-
-# Set assignment header
-assignment_name = list(assignments_found)[0] if len(assignments_found) == 1 else "Assignment"
-ws.cell(row=1, column=new_col, value=assignment_name)
-ws.cell(row=1, column=new_col).font = Font(bold=True)
-ws.cell(row=1, column=new_col).alignment = Alignment(horizontal='center')
-```
-
-#### Step 5.3: Mark Submissions
-```python
-green_fill = PatternFill(start_color='90EE90', end_color='90EE90', fill_type='solid')
-red_fill = PatternFill(start_color='FFB6C1', end_color='FFB6C1', fill_type='solid')
-
-for row in range(2, ws.max_row + 1):
-    student_name = ws.cell(row=row, column=2).value  # Column B = Student Name
-    if student_name:
-        has_submission = student_name in students
-        cell = ws.cell(row=row, column=new_col)
-        cell.value = 'X' if has_submission else ''
-        cell.fill = green_fill if has_submission else red_fill
-        cell.alignment = Alignment(horizontal='center')
-```
-
-#### Step 5.4: Update Total Formula
-```python
-# Update Total formula in the new Total column position (shifted right by 1)
-new_total_col = total_col + 1
-new_total_letter = get_column_letter(new_total_col - 1)
-for row in range(2, ws.max_row + 1):
-    # Count all X marks from column C to the column before Total
-    ws.cell(row=row, column=new_total_col).value = f'=COUNTIF(C{row}:{new_total_letter}{row},"X")'
-
-wb.save('{completion_spreadsheet}')
-```
-
-### Phase 6: Verification (CRITICAL FOR ACCURACY)
-
-**DO NOT SKIP THIS PHASE**
-
-#### Step 6.1: Verify Each Student PDF
-For EACH student PDF created:
-1. Open the PDF file using Read tool
-2. Check that ALL pages belong to that student
-3. Verify page count matches expected
-4. Close before opening next file
-
-```
-Verification checklist:
-□ Student name on all pages matches filename
-□ Page count matches mapping
-□ No pages from other students
-□ Assignment types are correctly identified
-```
-
-#### Step 6.2: Cross-Reference with Spreadsheet
-- Verify new assignment column was added correctly
-- Confirm X marks match students with PDFs
-- Check Total formulas updated
-- Verify existing columns preserved
-
-### Phase 7: Cleanup
-
-After verification is complete:
 ```bash
-rm -rf pages/  # Remove extracted images
+python scripts/create_student_pdfs.py {status_file} {homework_pdf} {output_folder}
 ```
 
-Keep:
-- Original PDF (backup)
-- Student Individual Files/ folder
-- {completion_spreadsheet} (updated with new assignment column)
+**Detailed instructions**: See [reference/pdf-creation.md](reference/pdf-creation.md)
+
+## Phase 4: Update Spreadsheet
+
+**INVOKE XLSX SKILL FIRST**
+
+1. Open existing completion spreadsheet
+2. Insert new assignment column before "Total"
+3. Mark submissions with 'X' (green fill) or blank (red fill)
+4. Update Total formula
+
+**Detailed instructions**: See [reference/spreadsheet-update.md](reference/spreadsheet-update.md)
+
+## Phase 5: Verification
+
+**DO NOT SKIP** - Verification catches errors.
+
+```
+Checklist:
+□ Each student PDF contains only that student's pages
+□ Page counts match expected
+□ Spreadsheet column added correctly
+□ X marks match created PDFs
+□ Total formulas updated
+```
+
+**Detailed instructions**: See [reference/verification.md](reference/verification.md)
 
 ## Output Structure
 
 ```
 {output_folder}/
-├── {homework_pdf} (original, keep as backup)
+├── {homework_pdf} (original, preserved)
 ├── Student Individual Files/
-│   ├── {StudentName1}.pdf
-│   ├── {StudentName2}.pdf
+│   ├── StudentName1.pdf
+│   ├── StudentName2.pdf
 │   └── ...
-└── {completion_spreadsheet} (UPDATED with new assignment column)
+├── pages/ (temporary, delete after verification)
+└── homework-grading-status.yaml
+
+{completion_spreadsheet} (updated in place)
 ```
 
 ## Accuracy Tips
 
-### Reading Handwritten Names
-1. **Focus on the Name field** - Usually top of page, labeled "Name:" or "Student:"
-2. **Read letter by letter** for messy handwriting
-3. **Compare to roster** - Pick closest match
-4. **Check consistency** - Same student's handwriting should look similar across pages
-5. **Look for full names** - First + Last name provides better matching
+| Tip | Why |
+|-----|-----|
+| Focus on Name field | Usually at top, labeled "Name:" or "Student:" |
+| Read letter by letter | Helps with messy handwriting |
+| Compare to roster | Pick closest match |
+| Check consistency | Same student's writing looks similar |
 
-### Fuzzy Matching Rules
+### Fuzzy Matching
+
 | Written | Roster Match | Reason |
 |---------|--------------|--------|
 | "Eliana Lugo" | Eliomar | Similar first name |
 | "J. Smith" | James/Jeremy | Check other pages |
 | Illegible | Unknown | Flag for manual review |
 
-### Common Mistakes to Avoid
-- ❌ Assuming page order = student order
-- ❌ Skipping pages
-- ❌ Not verifying after PDF creation
-- ❌ Mixing up similar names (James vs Jeremy)
-- ✅ Read EVERY page individually
-- ✅ Verify EVERY student PDF
-- ✅ Cross-check with roster
+### Common Mistakes
 
-## Error Handling
+- Assuming page order = student order
+- Skipping pages
+- Not verifying after PDF creation
+- Mixing up similar names (James vs Jeremy)
 
-### Unreadable Names
-```python
-unknown_pages = []  # Collect pages that can't be identified
-# After processing, report:
-if unknown_pages:
-    print(f"Manual review needed for pages: {unknown_pages}")
-```
+## Troubleshooting
 
-### Missing Students
-Students on roster with no submissions:
-- Include in checklist with empty columns
-- Do NOT create empty PDF files
+| Problem | Solution |
+|---------|----------|
+| Unreadable name | Set confidence to `unknown`, flag for manual review |
+| Session limit reached | Progress saved automatically; resume by running again |
+| Missing student | Include in checklist with empty cell, no PDF created |
+| Duplicate names | Use last name or check period number |
 
-### Duplicate Names
-If roster has duplicate first names:
-- Use last name to differentiate
-- Check period number on worksheet
-
-## When to Use This Skill
-
-Trigger phrases:
-- "Process this homework PDF"
-- "Organize homework by student"
-- "Grade these submissions"
-- "Sort student assignments"
-- "Create individual student files from this PDF"
-- "Check who submitted homework"
-- "Update homework checklist"
-- "Which students are missing assignments"
+**Detailed troubleshooting**: See [reference/troubleshooting.md](reference/troubleshooting.md)
 
 ## Prerequisites
 
-Required Python packages:
 ```bash
-pip install PyMuPDF pandas openpyxl
+pip install PyMuPDF pyyaml openpyxl filelock
 ```
-
-## Related Skills
-- **xlsx**: For spreadsheet operations (ALWAYS use for checklist)
-- **pdf**: For PDF manipulation
