@@ -13,7 +13,7 @@ Automate the processing of scanned student homework submissions:
 - **Roster Matching**: Match names to your class roster (Excel)
 - **Individual Files**: Create separate PDFs per student
 - **Completion Tracking**: Generate homework completion checklists
-- **Parallel Processing**: Page-analyzer subagent for batch vision analysis
+- **Session Resume**: Status tracking to continue across sessions
 
 ### agent-expert
 
@@ -86,8 +86,6 @@ Sallvain-Marketplace/
 │   │       └── agent-expert.md    # Agent definition
 │   └── homework-grading-workflow/
 │       ├── plugin.json            # Plugin manifest
-│       ├── agents/
-│       │   └── page-analyzer.md   # Vision subagent for batch processing
 │       └── skills/
 │           └── homework-grading-workflow/
 │               ├── SKILL.md       # Main skill definition
