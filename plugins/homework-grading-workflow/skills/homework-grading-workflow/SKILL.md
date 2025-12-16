@@ -123,90 +123,117 @@ with open(status_file, 'w') as f:
     yaml.dump(status, f, default_flow_style=False)
 ```
 
-#### Step 2.2: Spawn Parallel Subagents for Page Analysis
+#### Step 2.1.5: Choose Processing Mode
 
-**PERFORMANCE OPTIMIZATION**: Instead of analyzing pages sequentially (slow, hits 99 limit), spawn multiple subagents in parallel to divide the work.
+```
+📊 **Processing Mode**
 
-##### Calculate Subagent Allocation
+Total pages to analyze: {total_pages}
+
+[S] Sequential - Process pages one at a time (slower, but you see each page)
+[P] Parallel - Dispatch subagents to process simultaneously (faster)
+
+Recommended: Parallel for >20 pages
+```
+
+**If Parallel mode selected:**
+
+##### Dispatch Subagents in Parallel
 ```python
-if total_pages <= 25:
-    num_agents = 1
-elif total_pages <= 50:
-    num_agents = 2
-elif total_pages <= 100:
-    num_agents = 4
-else:
-    num_agents = min(8, (total_pages // 25) + 1)
-
-pages_per_agent = total_pages // num_agents
-print(f"📊 Spawning {num_agents} subagents, ~{pages_per_agent} pages each")
+num_subagents = min(4, (total_pages + 24) // 25)  # ~25 pages per subagent
+pages_per_agent = total_pages // num_subagents
 ```
 
-##### Define Page Ranges
-```python
-ranges = []
-for i in range(num_agents):
-    start = i * pages_per_agent
-    end = (i + 1) * pages_per_agent - 1 if i < num_agents - 1 else total_pages - 1
-    ranges.append((start, end))
+Use the Task tool to dispatch multiple subagents in a SINGLE message:
+- Each subagent processes a range of pages
+- All subagents update the shared status file with thread-safe locking
+- Report completion when done
+
+**Subagent prompt template:**
+```
+You are a page-reader subagent. Your task:
+1. Process pages {start_page} to {end_page} from: {pages_folder}
+2. For each page, read with vision and extract:
+   - Student name (from 'Name:' field at top)
+   - Assignment name (from header)
+   - Confidence level (high/medium/low/unknown)
+3. Update status file with thread-safe locking (fcntl): {status_file}
+4. Roster for matching: {roster}
 ```
 
-##### Spawn Subagents in Parallel
-
-Use the Task tool to spawn ALL agents simultaneously:
-
+##### Validate After Subagents Complete
 ```
-Task tool call:
-- subagent_type: "general-purpose"
-- prompt: |
-    You are a page analyzer subagent.
+🔍 **Subagent Validation Check**
 
-    YOUR ASSIGNED RANGE: pages {start} to {end}
-
-    FILES:
-    - Pages folder: {output_folder}/pages/
-    - Status file: {output_folder}/homework-grading-status.yaml
-
-    ROSTER: {roster_list}
-
-    INSTRUCTIONS:
-    1. Invoke Skill: homework-grading-workflow for context
-    2. Analyze EACH page in your range using vision (Read tool)
-    3. Look at the "Name:" field at the top of each worksheet
-    4. Update the status file after EACH page (use file locking)
-    5. Report when complete
+1. All pages have entries (0 to total_pages-1)
+2. No duplicate student assignments for same page
+3. Roster names used correctly
+4. Red flags:
+   - Same student on >50% of pages
+   - Student not in roster
+   - Too many "UNKNOWN" (>20%)
 ```
 
-**CRITICAL**: Spawn ALL agents in a SINGLE message with multiple Task tool calls.
+---
 
-##### Validate Subagent Results
+**If Sequential mode selected (or resuming):**
 
-After all agents complete, validate:
+#### Step 2.2: Analyze EVERY Page Individually (with Resume Support)
+**This is the most critical step for accuracy.**
+
+**RESUME LOGIC**: Skip pages already in status file, start from `last_analyzed_page + 1`
 
 ```python
-issues = []
+start_page = status['last_analyzed_page'] + 1
+if start_page > 0:
+    print(f"⏩ Skipping pages 0-{start_page - 1} (already analyzed)")
+```
 
-# Check 1: All pages analyzed
-analyzed_pages = set(status['pages'].keys())
-missing = set(range(total_pages)) - analyzed_pages
-if missing:
-    issues.append(f"❌ Missing pages: {missing}")
+For EACH page (starting from `start_page`):
+1. Use Claude's Read tool to view the page image
+2. Look at the **"Name:" field** at the TOP of the worksheet
+3. Read the handwritten student name carefully
+4. Identify the assignment type from the page header/title
+5. Record in status file IMMEDIATELY after each page
+6. Save status file after EVERY page (crash recovery)
 
-# Check 2: Unknown students threshold (>10%)
-unknown_count = sum(1 for p in status['pages'].values() if p.get('confidence') == 'unknown')
-if unknown_count > total_pages * 0.1:
-    issues.append(f"⚠️ High unknown rate: {unknown_count}/{total_pages}")
+**Page Analysis Template:**
+```
+Page X:
+- Raw name read: [exactly what you see written]
+- Matched student: [roster match]
+- Assignment: [assignment title from header]
+- Confidence: [high/medium/low]
+- Notes: [any issues]
+```
 
-# Check 3: Students not in roster
-for page_num, info in status['pages'].items():
-    student = info.get('matched_student')
-    if student and student != 'Unknown' and student not in roster:
-        issues.append(f"⚠️ Page {page_num}: '{student}' not in roster")
+**After EACH page, update and save status:**
+```python
+status['pages'][page_num] = {
+    'status': 'analyzed',
+    'raw_name': raw_name,
+    'matched_student': matched_student,
+    'assignment': assignment,
+    'confidence': confidence
+}
+status['last_analyzed_page'] = page_num
 
-if issues:
-    print("🔍 Validation Issues Found")
-else:
-    print("✅ Validation Passed")
+# Save immediately (crash recovery)
+with open(status_file, 'w') as f:
+    yaml.dump(status, f, default_flow_style=False)
+```
+
+**If 99 read limit reached:**
+```
+⚠️ Session Limit Reached
+
+Analyzed {N} pages this session (99 limit).
+Progress saved to: {status_file}
+
+To continue:
+1. Start a new Claude session
+2. Run the homework grading workflow again
+3. Workflow will resume from page {N+1}
 ```
 
 #### Step 2.3: Build Page Mapping Data Structure
