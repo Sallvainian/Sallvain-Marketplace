@@ -9,6 +9,14 @@ description: Process scanned homework PDFs by extracting student names from page
 
 This skill automates the processing of scanned student homework submissions through a multi-pass verification workflow that ensures accuracy.
 
+## ⚠️ THE REAL ACCURACY FIX
+
+**These three things are what made this workflow accurate:**
+
+1. **Reading EVERY page individually** - Do NOT batch pages. Analyze each page one at a time with Claude's vision.
+2. **Focusing on the Name field specifically** - Look at the TOP of each worksheet where "Name:" appears. Ignore other text.
+3. **Verification phase after PDF creation** - Open EACH student PDF and confirm all pages belong to that student before finishing.
+
 ## Critical Skills Integration
 
 **IMPORTANT**: This workflow uses these skills in conjunction:
