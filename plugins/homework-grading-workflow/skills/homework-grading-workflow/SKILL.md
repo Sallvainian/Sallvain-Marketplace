@@ -145,6 +145,55 @@ Common assignment patterns:
 | Investigating Force Interaction | 2 | "Force Interaction" header |
 | Lesson 5: Variables | 1 | "Lesson 5" header |
 
+### Phase 3.5: User Verification of Uncertain Pages
+
+**CRITICAL**: Before creating PDFs, the user MUST verify any pages with low confidence or unreadable names.
+
+If there are pages with confidence < high OR pages where the name could not be read:
+
+```
+⚠️ **Manual Verification Required**
+
+The following pages need your review:
+
+**Low Confidence Matches:**
+| Page | Raw Name Read | Best Match | Confidence |
+|------|---------------|------------|------------|
+| {page_num} | "{raw_name}" | {matched_student} | low |
+
+**Unreadable Names:**
+| Page | Notes |
+|------|-------|
+| {page_num} | Could not make out name |
+
+Please verify or correct each entry.
+```
+
+For each uncertain page:
+1. Display the page image to the user
+2. Ask: "Who does this page belong to? (or type 'skip' to exclude)"
+3. Update the page_mapping with user's correction
+4. Continue to next uncertain page
+
+Only proceed to PDF creation after ALL uncertain pages are resolved.
+
+```python
+# Collect pages needing review
+uncertain_pages = []
+for page_num, info in page_mapping.items():
+    if info.get('confidence') in ['low', 'unknown'] or info.get('student') == 'Unknown':
+        uncertain_pages.append((page_num, info))
+
+if uncertain_pages:
+    print(f"⚠️ {len(uncertain_pages)} pages need manual verification")
+    for page_num, info in uncertain_pages:
+        # Show page image and ask user to confirm/correct
+        user_response = ask_user(f"Page {page_num}: Read as '{info.get('raw_name')}', matched to '{info.get('student')}'. Correct?")
+        if user_response != 'skip':
+            page_mapping[page_num]['student'] = user_response
+            page_mapping[page_num]['confidence'] = 'user_verified'
+```
+
 ### Phase 4: Create Individual Student PDFs
 
 #### Step 4.1: Create Output Directory
