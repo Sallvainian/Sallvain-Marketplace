@@ -2,143 +2,205 @@
 
 ## Overview
 
-The status file (`homework-grading-status.yaml`) tracks workflow progress for crash recovery and session resumption.
+The tracking file (`homework-grading-status.yaml`) persists progress across sessions. Claude has a **99-image limit per session**, so this file enables resume.
+
+**CRITICAL**: Create this file BEFORE extracting PNGs or analyzing pages. Display the batch plan to user first.
+
+## Session Limit
+
+Claude can read a maximum of **99 images per session**. For a 150-page PDF, you need 2 sessions.
 
 ## Status File Schema
 
 ```yaml
-# Metadata
-generated: "2024-01-15T10:30:00"
-workflow_status: analyzing  # analyzing | creating_pdfs | updating_spreadsheet | verifying | complete
+# Homework Grading Status Tracking
+# This file persists progress across sessions (Claude has 99 read limit)
+# Resume workflow by running homework grading with same period
 
-# Progress tracking
-total_pages: 150
-last_analyzed_page: 75  # Resume from here
+generated: '2025-12-16T06:30:00'
+homework_pdf: /path/to/Homework-P4.pdf
+roster_file: /path/to/Student-Master-List.xlsx
+period: Period 4
+output_folder: /path/to/output
+completion_spreadsheet: /path/to/Homework-Completion-List.xlsx
 
-# Page data
+workflow_status: init  # init | analyzing | verification | creating_pdfs | updating_spreadsheet | verifying | complete
+total_pages: 121
+last_analyzed_page: -1  # -1 means not started
+pages_remaining: 121
+
+# Page-by-page tracking
 pages:
   0:
     status: analyzed
-    raw_name: "Keyla Martinez"
-    matched_student: "Keyla"
-    assignment: "Identifying Variables"
+    raw_name: "Giovanni Figueroa"
+    matched_student: "Giovanni"
+    assignment: "Understanding Variables in Science Experiments"
     confidence: high
   1:
     status: analyzed
-    raw_name: "Keyla M"
-    matched_student: "Keyla"
-    assignment: "Identifying Variables"
-    confidence: high
+    raw_name: "Dami"
+    matched_student: "Oluwadamilola"
+    assignment: "Understanding Variables in Science Experiments"
+    confidence: medium
   # ... more pages
 
-# Aggregated data
-students:
-  Keyla:
-    pages: [0, 1]
-    assignments: ["Identifying Variables"]
-  Briana:
-    pages: [2]
-    assignments: ["Identifying Variables"]
+# Student consolidation (built after all pages analyzed)
+students: {}
 
-# Review lists
-uncertain_pages: [45, 67, 89]
-assignments_found: ["Identifying Variables", "Force Interaction"]
+# Pages needing user verification
+uncertain_pages: []
+
+# Assignments found
+assignments_found:
+  - Understanding Variables in Science Experiments
+  - Identifying Variables
 ```
 
-## Initialization
+## Workflow Status Values
+
+| Status | Description |
+|--------|-------------|
+| init | Gathering inputs, creating tracking file |
+| analyzing | Reading pages, extracting names |
+| verification | User reviewing uncertain pages |
+| creating_pdfs | Generating individual student PDFs |
+| updating_spreadsheet | Updating completion tracker |
+| verifying | Final verification of outputs |
+| complete | Workflow finished |
+
+## Page Status Values
+
+| Status | Description |
+|--------|-------------|
+| pending | Not yet analyzed |
+| analyzed | Page read, name extracted |
+| verified | User confirmed the student |
+| skipped | User chose to skip this page |
+
+## Confidence Levels
+
+| Confidence | Criteria | Action |
+|------------|----------|--------|
+| high | Name clearly legible, exact roster match | Proceed automatically |
+| medium | Name readable, fuzzy match found | Proceed with note |
+| low | Name hard to read, best guess | Flag for user review |
+| unknown | Cannot read name at all | MUST get user input |
+
+## Creating the Tracking File
+
+Before any page analysis:
 
 ```python
-import yaml
-import os
-from datetime import datetime
+from scripts.update_status import create_tracking_file, display_batch_plan
 
-def init_status(output_folder, total_pages):
-    status_file = os.path.join(output_folder, 'homework-grading-status.yaml')
+# 1. Count pages first
+import fitz
+doc = fitz.open(homework_pdf)
+total_pages = len(doc)
+doc.close()
 
-    if os.path.exists(status_file):
-        # Resume mode
-        with open(status_file, 'r') as f:
-            status = yaml.safe_load(f)
-        print(f"Resuming from page {status.get('last_analyzed_page', -1) + 1}")
-        return status, status_file
+# 2. Show batch plan to user
+print(display_batch_plan(total_pages))
+# User must confirm before proceeding
 
-    # New status
-    status = {
-        'generated': datetime.now().isoformat(),
-        'workflow_status': 'analyzing',
-        'total_pages': total_pages,
-        'last_analyzed_page': -1,
-        'pages': {},
-        'students': {},
-        'uncertain_pages': [],
-        'assignments_found': []
-    }
-
-    save_status(status, status_file)
-    return status, status_file
+# 3. Create tracking file
+status, status_file = create_tracking_file(
+    homework_pdf=homework_pdf,
+    roster_file=roster_file,
+    period=period,
+    output_folder=output_folder,
+    completion_spreadsheet=completion_spreadsheet,
+    total_pages=total_pages
+)
 ```
 
-## Saving Status
+## Batch Plan Display
+
+For a 150-page PDF:
+
+```
+📋 BATCH PLAN
+Total pages: 150
+Max per session: 99
+Sessions needed: 2
+
+  Session 1: pages 0-98 (99 pages)
+  Session 2: pages 99-149 (51 pages)
+
+⚠️ This will require 2 Claude session(s) to complete.
+Continue? (User must confirm)
+```
+
+## Resuming a Session
+
+When workflow resumes, check tracking file:
 
 ```python
-def save_status(status, status_file):
-    with open(status_file, 'w') as f:
-        yaml.dump(status, f, default_flow_style=False, sort_keys=False)
+from scripts.update_status import load_tracking_file, get_resume_info
+
+status, status_file = load_tracking_file(output_folder)
+if status:
+    next_page, pages_remaining = get_resume_info(status)
+    if next_page is not None:
+        print(f"📂 Resuming from page {next_page} ({pages_remaining} remaining)")
 ```
 
-## Updating After Each Page
+## Updating Progress
+
+After each page, update tracking file immediately:
 
 ```python
-def update_page(status, status_file, page_num, page_data):
-    status['pages'][page_num] = page_data
-    status['last_analyzed_page'] = page_num
+from scripts.update_status import update_page
 
-    # Track uncertain pages
-    if page_data.get('confidence') in ['low', 'unknown']:
-        if page_num not in status['uncertain_pages']:
-            status['uncertain_pages'].append(page_num)
+page_data = {
+    'raw_name': raw_name,
+    'matched_student': matched_student,
+    'assignment': assignment,
+    'confidence': confidence
+}
 
-    # Track assignments
-    assignment = page_data.get('assignment')
-    if assignment and assignment not in status['assignments_found']:
-        status['assignments_found'].append(assignment)
-
-    save_status(status, status_file)
+update_page(status, status_file, page_num, page_data)
+# Status file is saved automatically
 ```
 
-## Thread-Safe Updates (Parallel Mode)
+**SAVE AFTER EVERY PAGE** - This enables crash recovery.
 
-For parallel subagent processing, use file locking:
+## Session Limit Check
+
+Monitor image count during analysis:
 
 ```python
-import filelock
+from scripts.update_status import check_session_limit
 
-def update_page_threadsafe(status_file, page_num, page_data):
-    lock = filelock.FileLock(f"{status_file}.lock")
+images_read = 0
+for page_num in range(start_page, total_pages):
+    # Read page image
+    images_read += 1
 
-    with lock:
-        with open(status_file, 'r') as f:
-            status = yaml.safe_load(f)
+    # Check limit
+    limit_reached, message = check_session_limit(images_read, status)
+    if limit_reached:
+        print(message)
+        break  # Stop, user must start new session
 
-        status['pages'][page_num] = page_data
-
-        # Update last_analyzed_page only if all prior pages done
-        if all(i in status['pages'] for i in range(page_num)):
-            status['last_analyzed_page'] = page_num
-
-        with open(status_file, 'w') as f:
-            yaml.dump(status, f, default_flow_style=False)
+    # Analyze page...
+    update_page(status, status_file, page_num, page_data)
 ```
 
-## Workflow Status Transitions
+## Session Limit Message
+
+When limit is reached:
 
 ```
-analyzing → creating_pdfs → updating_spreadsheet → verifying → complete
-```
+⚠️ SESSION LIMIT REACHED (99 images)
 
-Update status as workflow progresses:
+Progress saved to tracking file.
+Analyzed pages 0-98
+Pages remaining: 51
 
-```python
-status['workflow_status'] = 'creating_pdfs'
-save_status(status, status_file)
+To continue:
+1. Start a new Claude session
+2. Run homework grading workflow again
+3. Will resume from page 99
 ```

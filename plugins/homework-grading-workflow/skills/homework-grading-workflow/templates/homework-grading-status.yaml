@@ -1,0 +1,60 @@
+# Homework Grading Status Tracking
+# This file persists progress across sessions (Claude has 99 read limit)
+# Resume workflow by running homework grading with same period
+
+# STATUS DEFINITIONS:
+# ==================
+# Page Status:
+#   - pending: Not yet analyzed
+#   - analyzed: Page read, name extracted
+#   - low_confidence: Name read but uncertain match
+#   - unknown: Could not read name
+#   - verified: User confirmed the student
+#   - skipped: User chose to skip this page
+#
+# Workflow Status:
+#   - init: Gathering inputs
+#   - analyzing: Reading pages
+#   - verification: User reviewing uncertain pages
+#   - creating_pdfs: Generating student PDFs
+#   - updating_spreadsheet: Updating completion tracker
+#   - verifying: Final verification
+#   - complete: Workflow finished
+
+# RESUME INSTRUCTIONS:
+# ====================
+# If workflow was interrupted, it will:
+# 1. Load this file
+# 2. Skip pages already analyzed
+# 3. Continue from last_analyzed_page + 1
+
+generated: "{timestamp}"
+homework_pdf: "{homework_pdf}"
+roster_file: "{roster_file}"
+period: "{period}"
+output_folder: "{output_folder}"
+completion_spreadsheet: "{completion_spreadsheet}"
+
+workflow_status: init
+total_pages: 0
+last_analyzed_page: -1
+pages_remaining: 0
+
+# Page-by-page tracking
+pages:
+  # Example:
+  # 0:
+  #   status: analyzed
+  #   raw_name: "Keyla"
+  #   matched_student: "Keyla"
+  #   assignment: "Identifying Variables"
+  #   confidence: high
+
+# Student consolidation (built after all pages analyzed)
+students: {}
+
+# Pages needing user verification
+uncertain_pages: []
+
+# Assignments found
+assignments_found: []
