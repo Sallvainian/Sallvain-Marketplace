@@ -1,6 +1,7 @@
 {
   "name": "homework-grading-workflow",
   "description": "Automate homework grading workflow with PDF processing, student identification, and checklist generation",
-  "version": "1.0.0",
-  "skills": ["./homework-grading-workflow"]
+  "version": "1.1.0",
+  "skills": ["./homework-grading-workflow"],
+  "agents": ["agents/page-analyzer.md"]
 }
