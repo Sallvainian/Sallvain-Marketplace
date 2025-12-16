@@ -2,5 +2,5 @@
   "name": "homework-grading-workflow",
   "description": "Automate homework grading workflow with PDF processing, student identification, and checklist generation",
   "version": "1.0.0",
-  "skills": ["homework-grading-workflow"]
+  "skills": ["./homework-grading-workflow"]
 }

@@ -10,6 +10,12 @@
       "description": "Process scanned homework PDFs, identify students, create individual files, and generate completion checklists",
       "source": "./plugins/homework-grading-workflow",
       "version": "1.0.0"
+    },
+    {
+      "name": "agent-expert",
+      "description": "Expert agent for creating and validating Claude Code agents with proper structure and best practices",
+      "source": "./plugins/agent-expert",
+      "version": "1.0.0"
     }
   ]
 }
