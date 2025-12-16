@@ -2,5 +2,5 @@
   "name": "agent-expert",
   "description": "Expert agent for creating and validating Claude Code agents",
   "version": "1.0.0",
-  "agents": ["agents/agent-expert.md"]
+  "agents": ["./agents/agent-expert.md"]
 }
